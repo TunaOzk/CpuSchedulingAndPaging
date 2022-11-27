@@ -121,6 +121,7 @@ int getProcessInfo(Array *arr, char** processName, FILE** fp) {
         int num = atoi(token);
         insertArray(arr, num);
     }
+    insertArray(arr,0); // Address index that will be continued after time slice of the process has ended in RR scheduling.
     return 0;
 }
 
@@ -134,66 +135,144 @@ long int getFileSize(char* fileName) {
 
 void printPageTable(Array* arr, char *fileName) {
    printf("---PAGE TABLE OF %s---\n", fileName);
-   for (int i = 0; i < arr->size-1; i+=2) {
+   for (int i = 0; i < arr->size-1; i+=3) {
       printf("Page %d ---> Frame %d\n", arr->array[i], arr->array[i+1]);
    }
-   
+   printf("\n");
 }
 
-void setFramesFromMemory(char* fileName, FILE** fp) {
+void setFramesFromMemory(Array* pageTable, char* fileName, FILE** fp) {
     long int size = getFileSize(fileName);
     
     int numOfPages = (size / PAGE_SIZE);
     if(!numOfPages)
       numOfPages = 1;
     if(freeFramesListLength() < numOfPages) {
-        printf("Process %s has exceed the # of free pages.Continuing with the next Process...\n", fileName);
-        return;
+        printf("Process %s has exceed the # of free pages. Continuing with the next Process...\n", fileName);
+        return NULL;
     }
-    Array pageTable;
-    initArray(&pageTable, 1);
+
     for (int i = 0; i < numOfPages; i++) {
         int frameIndex = (rand() % freeFramesListLength()) - 1;
         struct node* node = deleteFromFreeFramesList(frameIndex);
-        insertArray(&pageTable, i);
-        insertArray(&pageTable, node->data);
+        insertArray(pageTable, i);
+        insertArray(pageTable, node->data);
+        insertArray(pageTable, 0); // Checks whether the page is in TLB.
     }
-    printPageTable(&pageTable, fileName);
+    printPageTable(pageTable, fileName);
 
 }
 
-int main(int argc, char const *argv[])
-{
+int isSchedulingFinished(Array** logicalAddresses) {
+   for(int i = 0; i < logicalAddresses[i]->size; i++) {
+      if(logicalAddresses[i]->array[logicalAddresses[i]->size-1] != logicalAddresses[i]->size-1)
+         return 0;
+   }
+   return 1;
+}
+
+void printTheSchedulingResults(Array tlbHits, Array tlbMisses, Array dispatches, int numberOfProcesses, char** processNames) {
+   for(int i = 0; i < numberOfProcesses; i++) {
+      printf("----Process %s----\n", processNames[i]);
+      printf("TLB Hits: %d\nTLB Misses: %d\nNumber of Dispatches: %d\n\n", 
+         tlbHits.array[i], tlbMisses.array[i], dispatches.array[i]);
+   }
+}
+
+int main(int argc, char const *argv[]) {
     srand((unsigned)time(NULL));
     char* fileName;
     int* sizeArr;
+    int numberOfProcesses = 0;
+    Array** pageTables = malloc(sizeof(Array*) * numberOfProcesses);
+    Array** logicalAddresses = malloc(sizeof(Array*) * numberOfProcesses);
+    char** processNames = malloc(sizeof(char*) * numberOfProcesses);
     initializeList(freeFramesList);
     for (int i = 0; i < NUMBER_OF_FRAMES; i++){
         insertfreeFrameList(i);
     }
     FILE* fp = fopen("tasks.txt", "r");
+    //Paging simulation part
     while(1) {
-      Array logicalAddressArr;
-      initArray(&logicalAddressArr, 1);
-      if(getProcessInfo(&logicalAddressArr,&fileName,&fp) == -1) {
-         freeArray(&logicalAddressArr);
+      numberOfProcesses++;
+      logicalAddresses = realloc(logicalAddresses, sizeof(Array*) * numberOfProcesses);
+      processNames = realloc(processNames, sizeof(Array*) * numberOfProcesses);
+      logicalAddresses[numberOfProcesses-1] = malloc(sizeof(Array*));
+      initArray(logicalAddresses[numberOfProcesses-1], 1);
+      if(getProcessInfo(logicalAddresses[numberOfProcesses-1],&processNames[numberOfProcesses-1],&fp) == -1) {
+         numberOfProcesses--;
          break;
       }
-      setFramesFromMemory(fileName,&fp);
-      freeArray(&logicalAddressArr);
+      
+      pageTables = realloc(pageTables, sizeof(Array*) * numberOfProcesses);
+      pageTables[numberOfProcesses-1] = malloc(sizeof(Array*));
+      initArray(pageTables[numberOfProcesses-1],1);
+      setFramesFromMemory(pageTables[numberOfProcesses-1],processNames[numberOfProcesses-1],&fp);
+    }
+    // Scheduling simulation part
+    Array tlbHits;
+    Array tlbMisses;
+    Array dispatches;
+    initArray(&tlbHits,numberOfProcesses);
+    initArray(&tlbMisses,numberOfProcesses);
+    initArray(&dispatches,numberOfProcesses);
+    int memoryAccessCount = 0;
+    int i = 0;
+    while (!isSchedulingFinished(logicalAddresses)) {
+
+      Array* logicalAddresArr = logicalAddresses[i];
+      for(int j = logicalAddresArr->array[logicalAddresArr->size-1]; j < logicalAddresArr->size-1; j++) {
+         int pageNo = logicalAddresArr->array[j] / PAGE_SIZE;
+         if(pageTables[i]->array[3*pageNo + 2] == 0) { // TLB miss
+            tlbMisses.array[i] = tlbMisses.array[i] + 1;
+            memoryAccessCount++; // for TLB access
+            pageTables[i]->array[3*pageNo + 2] = 1; // Entry has been added to TLB
+            if(memoryAccessCount == 5) {
+               logicalAddresArr->array[logicalAddresArr->size-1] = j;
+               dispatches.array[i] = dispatches.array[i] + 1;
+               
+               break;
+            }
+            memoryAccessCount++; // Searching in pageTable
+            if(memoryAccessCount == 5) {
+               logicalAddresArr->array[logicalAddresArr->size-1] = j;
+               dispatches.array[i] = dispatches.array[i] + 1;
+               
+               break;
+            }
+            memoryAccessCount++; // finding the real adress
+            if(memoryAccessCount == 5) {
+               logicalAddresArr->array[logicalAddresArr->size-1] = j+1;
+               dispatches.array[i] = dispatches.array[i] + 1;
+               break;
+            }
+         }
+         else { //TLB hit
+            tlbHits.array[i] = tlbHits.array[i] + 1;
+            memoryAccessCount++; // for TLB access
+            if(memoryAccessCount == 5) {
+               logicalAddresArr->array[logicalAddresArr->size-1] = j;
+               dispatches.array[i] = dispatches.array[i] + 1;
+               break;
+            }
+            memoryAccessCount++; // finding the real adress
+            if(memoryAccessCount == 5) {
+               logicalAddresArr->array[logicalAddresArr->size-1] = j+1;
+               dispatches.array[i] = dispatches.array[i] + 1;
+               break;
+            }
+         }
+         if(j == logicalAddresArr->size-2) {
+            
+            dispatches.array[i] = dispatches.array[i] + 1;
+            logicalAddresArr->array[logicalAddresArr->size-1] = j+1;
+         }
+            
+      }
+      memoryAccessCount = 0;
+      i = (i + 1) % numberOfProcesses;
     }
     
-    // while(1) {
-    //     Array logicalAddressArr;
-    //     initArray(&logicalAddressArr, 1);
-    //     if(getProcessInfo(&logicalAddressArr,&fileName,&fp) == -1)
-    //         break;
-    //     printf("File name %s\n", fileName);
-    //     printf("File %s has %ld bytes\n", fileName, getFileSize(fileName));
-    //     for(int i = 0; i < logicalAddressArr.size; i++)
-    //         printf("%d\n", logicalAddressArr.array[i]);
-    //     printf("\n");
-    //     freeArray(&logicalAddressArr);
-    // }
+    printTheSchedulingResults(tlbHits,tlbMisses,dispatches,numberOfProcesses, processNames);
     return 0;
 }
