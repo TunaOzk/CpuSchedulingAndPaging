@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#include <math.h>
 #define PROCESS_NAME 50
 #define BUFFER_SIZE 2048
 #define NUMBER_OF_FRAMES 250
@@ -87,7 +88,7 @@ typedef struct {
 } Array;
 
 void initArray(Array *arr, size_t initialSize) {
-  arr->array = malloc(initialSize * sizeof(int));
+  arr->array = calloc(initialSize, sizeof(int));
   arr->used = 0;
   arr->size = initialSize;
 }
@@ -144,11 +145,11 @@ void printPageTable(Array* arr, char *fileName) {
 void setFramesFromMemory(Array* pageTable, char* fileName, FILE** fp) {
     long int size = getFileSize(fileName);
     
-    int numOfPages = (size / PAGE_SIZE);
+    int numOfPages = (int)ceil((size / PAGE_SIZE));
     if(!numOfPages)
       numOfPages = 1;
     if(freeFramesListLength() < numOfPages) {
-        printf("Process %s has exceed the # of free pages. Continuing with the next Process...\n", fileName);
+        printf("Process %s has exceed the # of free pages. Continuing with the next Process...\n\n", fileName);
         return NULL;
     }
 
@@ -163,15 +164,18 @@ void setFramesFromMemory(Array* pageTable, char* fileName, FILE** fp) {
 
 }
 
-int isSchedulingFinished(Array** logicalAddresses) {
+int isSchedulingFinished(Array** logicalAddresses, Array** pageTables) {
    for(int i = 0; i < logicalAddresses[i]->size; i++) {
+      if(pageTables[i]->size == 0)
+         continue;
       if(logicalAddresses[i]->array[logicalAddresses[i]->size-1] != logicalAddresses[i]->size-1)
          return 0;
    }
    return 1;
 }
 
-void printTheSchedulingResults(Array tlbHits, Array tlbMisses, Array dispatches, int numberOfProcesses, char** processNames) {
+void printTheSchedulingResults(Array tlbHits, Array tlbMisses, Array dispatches, int numberOfProcesses,char** processNames) {
+   printf("\n");
    for(int i = 0; i < numberOfProcesses; i++) {
       printf("----Process %s----\n", processNames[i]);
       printf("TLB Hits: %d\nTLB Misses: %d\nNumber of Dispatches: %d\n\n", 
@@ -198,7 +202,7 @@ int main(int argc, char const *argv[]) {
       logicalAddresses = realloc(logicalAddresses, sizeof(Array*) * numberOfProcesses);
       processNames = realloc(processNames, sizeof(Array*) * numberOfProcesses);
       logicalAddresses[numberOfProcesses-1] = malloc(sizeof(Array*));
-      initArray(logicalAddresses[numberOfProcesses-1], 1);
+      initArray(logicalAddresses[numberOfProcesses-1], 0);
       if(getProcessInfo(logicalAddresses[numberOfProcesses-1],&processNames[numberOfProcesses-1],&fp) == -1) {
          numberOfProcesses--;
          break;
@@ -206,7 +210,7 @@ int main(int argc, char const *argv[]) {
       
       pageTables = realloc(pageTables, sizeof(Array*) * numberOfProcesses);
       pageTables[numberOfProcesses-1] = malloc(sizeof(Array*));
-      initArray(pageTables[numberOfProcesses-1],1);
+      initArray(pageTables[numberOfProcesses-1],0);
       setFramesFromMemory(pageTables[numberOfProcesses-1],processNames[numberOfProcesses-1],&fp);
     }
     // Scheduling simulation part
@@ -218,10 +222,11 @@ int main(int argc, char const *argv[]) {
     initArray(&dispatches,numberOfProcesses);
     int memoryAccessCount = 0;
     int i = 0;
-    while (!isSchedulingFinished(logicalAddresses)) {
-
+    while (!isSchedulingFinished(logicalAddresses, pageTables)) {
       Array* logicalAddresArr = logicalAddresses[i];
       for(int j = logicalAddresArr->array[logicalAddresArr->size-1]; j < logicalAddresArr->size-1; j++) {
+         if(pageTables[i]->size == 0) // Size of the process has exceed the number of free frames.
+            break;
          int pageNo = logicalAddresArr->array[j] / PAGE_SIZE;
          if(pageTables[i]->array[3*pageNo + 2] == 0) { // TLB miss
             tlbMisses.array[i] = tlbMisses.array[i] + 1;

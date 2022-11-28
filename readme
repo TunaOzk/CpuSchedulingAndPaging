@@ -1,0 +1,29 @@
+--CPU Scheduling and Paging--
+Bu uyguluma bir CPU Scheduling ve Paging simulasyonudur.
+Bir dosya icerisindeki (tasks.txt) var olan her dosya ismi bir processi belirtir.
+Dosya isimlerinin yanlarinda yer alan sayilar ise o processin execute asamasinda
+erismesi beklenen logical adresleridir.
+Uygulama, var olan processlerin Page Table'larini olusturur ve ekrana bastirir.
+Ardindan RR Scheduling'e benzer basit bir yapida scheduling yontemi ilgili processlere
+uygulanir (Her 5 memory accesste baska bir process dispatch edilir.).
+
+Derleme:
+gcc hw3.c -o hw3
+
+Calistirma:
+./hw3
+
+Varsayimlar:
+1)Verilen logical adres kullanilarak ilgili gercek adrese ulasilamadiysa bir sonraki
+dispatch'te ayni logical adresten tekrar baslanir. Ornegin logical adres 100 kullanilarak
+ilgili frame'e ulasilmak istenilsin. 100. adres => 0.Page'te yer aliyor. Eger 0.Page TLB'de
+yer almiyorsa toplamda 3 memory access gerceklesecektir:
+1-TLB erisimi
+2-Page Table erisimi
+3-Fiziksel adrese erisim
+Bir process icin ayrilan 5 memory access, herhangi bir logical adres icin 1. veya 2. adimdayken
+tamamlanmissa fiziksel adrese erisim saglandigi varsayilmaz. Ayni process'e sira geldiginde fiziksel
+adrese erisimi tamamlanmamis olan bu logical adresten bastan itibaren (1.adimdan itibaren) erisimler
+tekrarlanir.
+2)Verilen logical adreslerin gecerli olduklari varsayilmistir.Herhangi bir logical adres var olmayan bir
+page'teki adrese erismeyecektir.
